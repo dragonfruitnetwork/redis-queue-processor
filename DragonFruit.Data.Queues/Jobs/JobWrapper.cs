@@ -16,6 +16,9 @@ namespace DragonFruit.Data.Queues
         [JsonPropertyName("job_type_id")]
         public string JobTypeId { get; set; }
 
+        [JsonPropertyName("job_id")]
+        public string JobId { get; set; }
+
         [JsonPropertyName("props")]
         public T Data { get; set; }
     }
