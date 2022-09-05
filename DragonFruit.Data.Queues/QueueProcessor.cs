@@ -7,6 +7,7 @@ using System.Data;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using DragonFruit.Data.Queues.Jobs;
@@ -42,18 +43,6 @@ namespace DragonFruit.Data.Queues
 
             _queueKey = queueKey;
             _queueEventsKey = $"__keyspace@{databaseId}__:{queueKey}";
-
-            if (typeof(T) == typeof(Job))
-            {
-                // register tasks by assembly
-                RegisterJobs(Assembly.GetEntryAssembly());
-            }
-            else
-            {
-                // register tasks by assembly
-                var type = typeof(T);
-                _jobMap[GetJobTypeId(type)] = type;
-            }
         }
 
         /// <summary>
@@ -80,23 +69,33 @@ namespace DragonFruit.Data.Queues
         {
             foreach (var type in assembly.ExportedTypes.Where(x => !x.IsAbstract && !x.IsInterface && typeof(Job).IsAssignableFrom(x)))
             {
-                var typeId = GetJobTypeId(type);
-
-                // ensure there are no duplicates
-                if (_jobMap.ContainsKey(typeId))
-                {
-                    throw new DuplicateNameException($"Duplicate key {typeId} was found");
-                }
-
-                _jobMap[typeId] = type;
+                RegisterJob(type);
             }
+        }
+
+        /// <summary>
+        /// Register a single job on this queue. This can be called multiple times on different types without issue.
+        /// </summary>
+        /// <param name="type">The job type to register</param>
+        /// <exception cref="DuplicateNameException">The job has already been registered, or a duplicate name has been found</exception>
+        public void RegisterJob(Type type)
+        {
+            var typeId = GetJobTypeId(type);
+
+            // ensure there are no duplicates
+            if (_jobMap.ContainsKey(typeId))
+            {
+                throw new DuplicateNameException($"Duplicate key {typeId} was found");
+            }
+
+            _jobMap[typeId] = type;
         }
 
         /// <summary>
         /// Queue a collection of jobs to be run on the task processor
         /// </summary>
         /// <param name="jobs"></param>
-        public async Task Enqueue(params T[] jobs)
+        public async Task EnqueueAsync(params T[] jobs)
         {
             var index = 0;
             var convertedJobs = new SortedSetEntry[jobs.Length];
@@ -105,15 +104,27 @@ namespace DragonFruit.Data.Queues
             {
                 // needs to be an object to get serialization to work
                 var jobEntry = new JobWrapper<object>(GetJobTypeId(job.GetType()), job);
-                var utf8Bytes = JsonSerializer.SerializeToUtf8Bytes<object>(jobEntry, SerializerOptions);
+
+                if (job.AllowDuplicates)
+                {
+                    // setting a guid will prevent set from detecting as a duplicate
+                    jobEntry.JobId = Guid.NewGuid().ToString("D");
+                }
 
                 // use unix epoch as the score
+                var utf8Bytes = JsonSerializer.SerializeToUtf8Bytes<object>(jobEntry, SerializerOptions);
                 convertedJobs[index++] = new SortedSetEntry(utf8Bytes.AsMemory(), DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             }
 
             await _redis.GetDatabase().SortedSetAddAsync(_queueKey, convertedJobs, SortedSetWhen.NotExists).ConfigureAwait(false);
             _processorSignal.Set();
         }
+
+        /// <summary>
+        /// Clears/Deletes the queue
+        /// </summary>
+        /// <returns>Whether the operation was successful, in an async <see cref="Task"/></returns>
+        public Task<bool> Clear() => _redis.GetDatabase().KeyDeleteAsync(_queueKey);
 
         protected override async Task ExecuteAsync(CancellationToken cancellation)
         {
@@ -136,7 +147,7 @@ namespace DragonFruit.Data.Queues
                     continue;
                 }
 
-                _logger.Log(LogLevel.Information, "Queue processing started");
+                _logger?.Log(LogLevel.Information, "Queue processing started");
                 var jobBatch = Array.Empty<SortedSetEntry>();
 
                 do
@@ -144,7 +155,7 @@ namespace DragonFruit.Data.Queues
                     try
                     {
                         // get job and process each one
-                        _logger.Log(LogLevel.Debug, "Fetching next batch of items");
+                        _logger?.Log(LogLevel.Debug, "Fetching next batch of items");
                         jobBatch = await _redis.GetDatabase().SortedSetPopAsync(_queueKey, MaxConcurrency).ConfigureAwait(false);
 
                         if (!jobBatch.Any())
@@ -155,10 +166,16 @@ namespace DragonFruit.Data.Queues
                         // convert batch to tasks
                         var jobs = jobBatch.Select(x =>
                         {
-                            var job = JsonSerializer.Deserialize<T>((byte[])x.Element, SerializerOptions);
+                            var job = JsonSerializer.Deserialize<JobWrapper<JsonObject>>((byte[])x.Element, SerializerOptions);
+
+                            if (!_jobMap.TryGetValue(job.JobTypeId, out var type))
+                            {
+                                _logger?.Log(LogLevel.Error, "Invalid job discovered in queue: {job}", job);
+                                return Task.CompletedTask;
+                            }
 
                             using var scope = _scopeFactory.CreateScope();
-                            return job?.Perform(scope) ?? Task.CompletedTask;
+                            return (job.Data.Deserialize(type) as Job)?.Perform(scope) ?? Task.CompletedTask;
                         });
 
                         // wait for completion
@@ -166,7 +183,7 @@ namespace DragonFruit.Data.Queues
                     }
                     catch (Exception e)
                     {
-                        _logger.Log(LogLevel.Error, e, "Queue processing failed ({queue})", _queueKey);
+                        _logger?.Log(LogLevel.Error, e, "Queue processing failed ({queue})", _queueKey);
                     }
                 } while (jobBatch.Any() && !cancellation.IsCancellationRequested);
 
