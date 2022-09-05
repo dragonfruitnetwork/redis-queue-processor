@@ -1,0 +1,10 @@
+﻿version: "3.9"
+
+services:
+  redis:
+    image: redis
+    command: "/usr/local/etc/redis.conf"
+    volumes:
+      - ./redis-test.conf:/usr/local/etc/redis.conf
+    ports:
+      - 6379:6379
