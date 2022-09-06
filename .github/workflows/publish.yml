@@ -1,0 +1,9 @@
+name: Publish
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  deploy:
+    uses: dragonfruitnetwork/workflows/nuget-publish.yml@master
