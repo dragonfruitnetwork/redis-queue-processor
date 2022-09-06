@@ -9,6 +9,7 @@ using StackExchange.Redis;
 
 namespace DragonFruit.Data.Queues.Tests.Jobs
 {
+    [JobTypeId("counter")]
     public class IncrementCounterJob : Job
     {
         internal const string RedisKey = "test-counter";
