@@ -6,4 +6,4 @@ on:
 
 jobs:
   deploy:
-    uses: dragonfruitnetwork/workflows/nuget-publish.yml@master
+    uses: dragonfruitnetwork/workflows/.github/workflows/nuget-publish.yml@master
