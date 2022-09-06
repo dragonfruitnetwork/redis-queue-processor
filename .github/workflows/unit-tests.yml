@@ -22,8 +22,8 @@ jobs:
       
       - name: Startup Docker Components
         run: |
-          cd $GITHUB_WORKSPACE/DragonFruit.Data.Queues.Tests
-          docker-compose up -f docker-compose.yml
+          cd DragonFruit.Data.Queues.Tests
+          docker-compose up
         
       - name: Run Unit Tests
         run: dotnet test
