@@ -1,6 +1,7 @@
 ﻿// Copyright (c) DragonFruit Network <inbox@dragonfruit.network>
 // Licensed under MIT. Refer to the LICENSE file for more info
 
+using System;
 using System.Threading.Tasks;
 using DragonFruit.Data.Queues.Jobs;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,9 +13,9 @@ namespace DragonFruit.Data.Queues.Tests.Jobs
     {
         internal const string RedisKey = "test-switch";
 
-        public override Task Perform(IServiceScope scope)
+        public override Task Perform(IServiceProvider scope)
         {
-            var redis = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
+            var redis = scope.GetRequiredService<IConnectionMultiplexer>();
             return redis.GetDatabase().StringSetAsync(RedisKey, "1");
         }
     }

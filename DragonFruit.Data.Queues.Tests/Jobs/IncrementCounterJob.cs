@@ -1,6 +1,7 @@
 ﻿// Copyright (c) DragonFruit Network <inbox@dragonfruit.network>
 // Licensed under MIT. Refer to the LICENSE file for more info
 
+using System;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using DragonFruit.Data.Queues.Jobs;
@@ -24,9 +25,9 @@ namespace DragonFruit.Data.Queues.Tests.Jobs
         [JsonPropertyName("value")]
         public int Value { get; set; }
 
-        public override Task Perform(IServiceScope scope)
+        public override Task Perform(IServiceProvider scope)
         {
-            var redis = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
+            var redis = scope.GetRequiredService<IConnectionMultiplexer>();
             return redis.GetDatabase().StringIncrementAsync(RedisKey, Value);
         }
     }
