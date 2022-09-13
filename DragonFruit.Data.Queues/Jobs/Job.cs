@@ -19,11 +19,11 @@ namespace DragonFruit.Data.Queues.Jobs
         /// </summary>
         public abstract Task Perform(IServiceProvider scope);
 
-        internal Task PerformInternal(IServiceScope scope)
+        internal async Task PerformInternal(IServiceScope scope)
         {
             using (scope)
             {
-                return Perform(scope.ServiceProvider);
+                await Perform(scope.ServiceProvider).ConfigureAwait(false);
             }
         }
     }
