@@ -147,7 +147,7 @@ namespace DragonFruit.Data.Queues
                     continue;
                 }
 
-                _logger?.Log(LogLevel.Information, "Queue processing started");
+                _logger?.Log(LogLevel.Information, "Queue processing started ({name})", _queueKey);
                 var jobBatch = Array.Empty<SortedSetEntry>();
 
                 do
@@ -174,8 +174,7 @@ namespace DragonFruit.Data.Queues
                                 return Task.CompletedTask;
                             }
 
-                            using var scope = _scopeFactory.CreateScope();
-                            return (job.Data.Deserialize(type) as Job)?.Perform(scope) ?? Task.CompletedTask;
+                            return (job.Data.Deserialize(type) as Job)?.PerformInternal(_scopeFactory.CreateScope()) ?? Task.CompletedTask;
                         });
 
                         // wait for completion
@@ -189,6 +188,7 @@ namespace DragonFruit.Data.Queues
 
                 // reset processing signal
                 _processorSignal.Reset();
+                _logger?.Log(LogLevel.Information, "Queue processing complete ({queue})", _queueKey);
             }
 
             await _redis.GetSubscriber().UnsubscribeAsync(_queueEventsKey, OnQueueEvent).ConfigureAwait(false);
