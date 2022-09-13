@@ -1,5 +1,6 @@
 # DragonFruit Redis Queue Processor
 [![DragonFruit Discord](https://img.shields.io/discord/482528405292843018?label=Discord&style=popout)](https://discord.gg/VA26u5Z)
+[![Nuget](https://img.shields.io/nuget/v/DragonFruit.Data.Queues)](https://nuget.org/packages/DragonFruit.Data.Queues)
 
 A lightweight queue processor for C# using redis and json.
 
