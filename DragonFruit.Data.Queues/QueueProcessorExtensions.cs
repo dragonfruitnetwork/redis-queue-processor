@@ -1,6 +1,7 @@
 ﻿// Copyright (c) DragonFruit Network <inbox@dragonfruit.network>
 // Licensed under MIT. Refer to the LICENSE file for more info
 
+using System;
 using System.Reflection;
 using DragonFruit.Data.Queues.Jobs;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,9 +19,10 @@ namespace DragonFruit.Data.Queues
         /// <param name="queueKey">The key of the redis object</param>
         /// <param name="batchSize">The size of batches to be retrieved from the queue. Defaults to 1</param>
         /// <param name="databaseId">The id of the database to listen for changes on. Defaults to database 0</param>
-        public static void AddQueueProcessor(this IServiceCollection services, string queueKey, int batchSize = 1, int databaseId = 0)
+        /// <param name="configureAction">Optional <see cref="Action{T}"/> that can be used to configure additional properties of the <see cref="QueueProcessor{T}"/></param>
+        public static void AddQueueProcessor(this IServiceCollection services, string queueKey, int batchSize = 1, int databaseId = 0, Action<QueueProcessor<Job>> configureAction = null)
         {
-            AddQueueProcessor<Job>(services, queueKey, batchSize, databaseId);
+            AddQueueProcessor<Job>(services, queueKey, batchSize, databaseId, configureAction);
         }
 
         /// <summary>
@@ -30,7 +32,8 @@ namespace DragonFruit.Data.Queues
         /// <param name="queueKey">The key of the redis object</param>
         /// <param name="batchSize">The size of batches to be retrieved from the queue. Defaults to 1</param>
         /// <param name="databaseId">The id of the database to listen for changes on. Defaults to database 0</param>
-        public static void AddQueueProcessor<T>(this IServiceCollection services, string queueKey, int batchSize = 1, int databaseId = 0) where T : Job
+        /// <param name="configureAction">Optional <see cref="Action{T}"/> that can be used to configure additional properties of the <see cref="QueueProcessor{T}"/></param>
+        public static void AddQueueProcessor<T>(this IServiceCollection services, string queueKey, int batchSize = 1, int databaseId = 0, Action<QueueProcessor<T>> configureAction = null) where T : Job
         {
             services.AddSingleton(s =>
             {
@@ -38,7 +41,10 @@ namespace DragonFruit.Data.Queues
                 var scope = s.GetRequiredService<IServiceScopeFactory>();
                 var logger = s.GetService<ILogger<QueueProcessor<T>>>();
 
-                var queue = new QueueProcessor<T>(logger, scope, redis, queueKey, databaseId) { MaxConcurrency = batchSize };
+                var queue = new QueueProcessor<T>(logger, scope, redis, queueKey, databaseId)
+                {
+                    MaxConcurrency = batchSize
+                };
 
                 if (typeof(T) == typeof(Job))
                 {
@@ -49,6 +55,7 @@ namespace DragonFruit.Data.Queues
                     queue.RegisterJob(typeof(T));
                 }
 
+                configureAction?.Invoke(queue);
                 return queue;
             });
 
