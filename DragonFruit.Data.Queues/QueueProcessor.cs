@@ -56,6 +56,12 @@ namespace DragonFruit.Data.Queues
         }
 
         /// <summary>
+        /// Gets or sets the lifetime of a <see cref="IServiceProvider"/> created when processing jobs.
+        /// For legacy reasons, this defaults to <see cref="ScopeOptions.PerJob"/>
+        /// </summary>
+        public ScopeOptions ScopeLifetime { get; set; }
+
+        /// <summary>
         /// The <see cref="JsonSerializerOptions"/> to use when serializing/deserializing queue entries
         /// </summary>
         public JsonSerializerOptions SerializerOptions { get; set; }
@@ -147,11 +153,15 @@ namespace DragonFruit.Data.Queues
                     continue;
                 }
 
-                _logger?.Log(LogLevel.Information, "Queue processing started ({name})", _queueKey);
+                var serviceProvider = ScopeLifetime == ScopeOptions.PerCycle ? _scopeFactory.CreateScope() : null;
                 var jobBatch = Array.Empty<SortedSetEntry>();
+
+                _logger?.Log(LogLevel.Information, "Queue processing started ({name})", _queueKey);
 
                 do
                 {
+                    Lazy<List<IServiceScope>> jobScopes = null;
+
                     try
                     {
                         // get job and process each one
@@ -159,30 +169,67 @@ namespace DragonFruit.Data.Queues
                         jobBatch = await _redis.GetDatabase().SortedSetPopAsync(_queueKey, MaxConcurrency).ConfigureAwait(false);
 
                         if (!jobBatch.Any())
-                        {
                             continue;
+
+                        // if using a per-batch scope, dispose and reset now
+                        if (ScopeLifetime == ScopeOptions.PerBatch)
+                        {
+                            serviceProvider?.Dispose();
+                            serviceProvider = _scopeFactory.CreateScope();
                         }
 
-                        // convert batch to tasks
-                        var jobs = jobBatch.Select(x =>
-                        {
-                            var job = JsonSerializer.Deserialize<JobWrapper<JsonObject>>((byte[])x.Element, SerializerOptions);
+                        var jobTasks = new List<Task>(jobBatch.Length);
+                        jobScopes = new Lazy<List<IServiceScope>>(() => new List<IServiceScope>(jobTasks.Capacity), LazyThreadSafetyMode.None);
 
-                            if (!_jobMap.TryGetValue(job.JobTypeId, out var type))
+                        // convert batch to tasks
+                        foreach (var entry in jobBatch)
+                        {
+                            var jobInfo = JsonSerializer.Deserialize<JobWrapper<JsonObject>>((byte[])entry.Element, SerializerOptions);
+
+                            if (!_jobMap.TryGetValue(jobInfo.JobTypeId, out var type))
                             {
-                                _logger?.Log(LogLevel.Error, "Invalid job discovered in queue: {job}", job);
-                                return Task.CompletedTask;
+                                _logger?.Log(LogLevel.Error, "Invalid job discovered in queue: {job}", jobInfo);
+                                continue;
                             }
 
-                            return (job.Data.Deserialize(type) as Job)?.PerformInternal(_scopeFactory.CreateScope()) ?? Task.CompletedTask;
-                        });
+                            if (jobInfo.Data.Deserialize(type) is not Job job)
+                            {
+                                continue;
+                            }
+
+                            if (serviceProvider != null)
+                            {
+                                jobTasks.Add(job.PerformInternal(serviceProvider));
+                            }
+                            else
+                            {
+                                var scope = _scopeFactory.CreateScope();
+                                var jobTask = job.PerformInternal(scope);
+
+                                jobTasks.Add(jobTask);
+                                jobScopes.Value.Add(scope);
+                            }
+                        }
 
                         // wait for completion
-                        await Task.WhenAll(jobs).ConfigureAwait(false);
+                        await Task.WhenAll(jobTasks).ConfigureAwait(false);
                     }
                     catch (Exception e)
                     {
                         _logger?.Log(LogLevel.Error, e, "Queue processing failed ({queue})", _queueKey);
+                    }
+                    finally
+                    {
+                        serviceProvider?.Dispose();
+
+                        // clear all scopes
+                        if (jobScopes?.IsValueCreated == true)
+                        {
+                            foreach (var scope in jobScopes.Value)
+                            {
+                                scope.Dispose();
+                            }
+                        }
                     }
                 } while (jobBatch.Any() && !cancellation.IsCancellationRequested);
 
