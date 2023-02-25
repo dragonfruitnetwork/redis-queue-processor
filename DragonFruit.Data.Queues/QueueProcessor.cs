@@ -200,7 +200,10 @@ namespace DragonFruit.Data.Queues
                             {
                                 jobTasks.Add(job.PerformInternal(jobCycleScope.Value));
                             }
-
+                            else if (batchScope != null)
+                            {
+                                jobTasks.Add(job.PerformInternal(batchScope));
+                            }
                             else
                             {
                                 var scope = _scopeFactory.CreateScope();
