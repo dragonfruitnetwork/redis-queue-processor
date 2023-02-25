@@ -220,7 +220,7 @@ namespace DragonFruit.Data.Queues
                     }
                     finally
                     {
-                        // clear all scopes
+                        // clear all PerJob scopes
                         if (jobScopes?.IsValueCreated == true)
                         {
                             foreach (var scope in jobScopes.Value)
