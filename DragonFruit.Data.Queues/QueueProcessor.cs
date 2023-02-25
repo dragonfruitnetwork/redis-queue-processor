@@ -153,7 +153,7 @@ namespace DragonFruit.Data.Queues
                     continue;
                 }
 
-                var serviceProvider = ScopeLifetime == ScopeOptions.PerCycle ? _scopeFactory.CreateScope() : null;
+                var jobCycleScope = new Lazy<IServiceScope>(() => _scopeFactory.CreateScope(), LazyThreadSafetyMode.None);
                 var jobBatch = Array.Empty<SortedSetEntry>();
 
                 _logger?.Log(LogLevel.Information, "Queue processing started ({name})", _queueKey);
@@ -161,6 +161,7 @@ namespace DragonFruit.Data.Queues
                 do
                 {
                     Lazy<List<IServiceScope>> jobScopes = null;
+                    IServiceScope batchScope = null;
 
                     try
                     {
@@ -169,16 +170,14 @@ namespace DragonFruit.Data.Queues
                         jobBatch = await _redis.GetDatabase().SortedSetPopAsync(_queueKey, MaxConcurrency).ConfigureAwait(false);
 
                         if (!jobBatch.Any())
-                            continue;
-
-                        // if using a per-batch scope, dispose and reset now
-                        if (ScopeLifetime == ScopeOptions.PerBatch)
                         {
-                            serviceProvider?.Dispose();
-                            serviceProvider = _scopeFactory.CreateScope();
+                            continue;
                         }
 
                         var jobTasks = new List<Task>(jobBatch.Length);
+
+                        // init scopes
+                        batchScope = ScopeLifetime == ScopeOptions.PerBatch ? _scopeFactory.CreateScope() : null;
                         jobScopes = new Lazy<List<IServiceScope>>(() => new List<IServiceScope>(jobTasks.Capacity), LazyThreadSafetyMode.None);
 
                         // convert batch to tasks
@@ -197,10 +196,11 @@ namespace DragonFruit.Data.Queues
                                 continue;
                             }
 
-                            if (serviceProvider != null)
+                            if (ScopeLifetime == ScopeOptions.PerCycle)
                             {
-                                jobTasks.Add(job.PerformInternal(serviceProvider));
+                                jobTasks.Add(job.PerformInternal(jobCycleScope.Value));
                             }
+
                             else
                             {
                                 var scope = _scopeFactory.CreateScope();
@@ -221,6 +221,8 @@ namespace DragonFruit.Data.Queues
                     finally
                     {
                         // clear all PerJob scopes
+                        batchScope?.Dispose();
+
                         if (jobScopes?.IsValueCreated == true)
                         {
                             foreach (var scope in jobScopes.Value)
@@ -231,8 +233,11 @@ namespace DragonFruit.Data.Queues
                     }
                 } while (jobBatch.Any() && !cancellation.IsCancellationRequested);
 
-                // dispose service provider on both PerCycle and last scope on PerBatch
-                serviceProvider?.Dispose();
+                // dispose global scope
+                if (jobCycleScope.IsValueCreated)
+                {
+                    jobCycleScope.Value.Dispose();
+                }
 
                 // reset processing signal
                 _processorSignal.Reset();
