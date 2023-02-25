@@ -3,7 +3,6 @@
 
 using System;
 using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace DragonFruit.Data.Queues.Jobs
 {
@@ -18,13 +17,5 @@ namespace DragonFruit.Data.Queues.Jobs
         /// Performs the current job as an asynchronous task
         /// </summary>
         public abstract Task Perform(IServiceProvider scope);
-
-        internal async Task PerformInternal(IServiceScope scope)
-        {
-            using (scope)
-            {
-                await Perform(scope.ServiceProvider).ConfigureAwait(false);
-            }
-        }
     }
 }

@@ -198,16 +198,16 @@ namespace DragonFruit.Data.Queues
 
                             if (ScopeLifetime == ScopeOptions.PerCycle)
                             {
-                                jobTasks.Add(job.PerformInternal(jobCycleScope.Value));
+                                jobTasks.Add(job.Perform(jobCycleScope.Value.ServiceProvider));
                             }
                             else if (batchScope != null)
                             {
-                                jobTasks.Add(job.PerformInternal(batchScope));
+                                jobTasks.Add(job.Perform(batchScope.ServiceProvider));
                             }
                             else
                             {
                                 var scope = _scopeFactory.CreateScope();
-                                var jobTask = job.PerformInternal(scope);
+                                var jobTask = job.Perform(scope.ServiceProvider);
 
                                 jobTasks.Add(jobTask);
                                 jobScopes.Value.Add(scope);
