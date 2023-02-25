@@ -220,8 +220,6 @@ namespace DragonFruit.Data.Queues
                     }
                     finally
                     {
-                        serviceProvider?.Dispose();
-
                         // clear all scopes
                         if (jobScopes?.IsValueCreated == true)
                         {
@@ -232,6 +230,9 @@ namespace DragonFruit.Data.Queues
                         }
                     }
                 } while (jobBatch.Any() && !cancellation.IsCancellationRequested);
+
+                // dispose service provider on both PerCycle and last scope on PerBatch
+                serviceProvider?.Dispose();
 
                 // reset processing signal
                 _processorSignal.Reset();
