@@ -89,22 +89,27 @@ namespace DragonFruit.Data.Queues
             var typeId = GetJobTypeId(type);
 
             // ensure there are no duplicates
-            if (_jobMap.ContainsKey(typeId))
+            if (!_jobMap.TryAdd(typeId, type))
             {
                 throw new DuplicateNameException($"Duplicate key {typeId} was found");
             }
-
-            _jobMap[typeId] = type;
         }
+
+        /// <summary>
+        /// Queue one or more jobs to be run on the task processor
+        /// </summary>
+        /// <param name="jobs">The jobs to enqueue</param>
+        public Task EnqueueAsync(params T[] jobs) => EnqueueAsync(jobs, null);
 
         /// <summary>
         /// Queue a collection of jobs to be run on the task processor
         /// </summary>
-        /// <param name="jobs"></param>
-        public async Task EnqueueAsync(params T[] jobs)
+        /// <param name="jobs">The jobs to enqueue</param>
+        /// <param name="transaction">Optional transaction to queue against</param>
+        public async Task EnqueueAsync(IReadOnlyCollection<T> jobs, ITransaction transaction = null)
         {
             var index = 0;
-            var convertedJobs = new SortedSetEntry[jobs.Length];
+            var convertedJobs = new SortedSetEntry[jobs.Count];
 
             foreach (var job in jobs)
             {
@@ -122,8 +127,17 @@ namespace DragonFruit.Data.Queues
                 convertedJobs[index++] = new SortedSetEntry(utf8Bytes.AsMemory(), DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             }
 
-            await _redis.GetDatabase().SortedSetAddAsync(_queueKey, convertedJobs, SortedSetWhen.NotExists).ConfigureAwait(false);
-            _processorSignal.Set();
+            if (transaction == null)
+            {
+                await _redis.GetDatabase().SortedSetAddAsync(_queueKey, convertedJobs, SortedSetWhen.NotExists).ConfigureAwait(false);
+                _processorSignal.Set();
+            }
+            else
+            {
+                // do not await on a transaction because it'll deadlock waiting for the tx to commit
+                // see https://stackexchange.github.io/StackExchange.Redis/Transactions.html#and-in-stackexchangeredis
+                _ = transaction.SortedSetAddAsync(_queueKey, convertedJobs, SortedSetWhen.NotExists);
+            }
         }
 
         /// <summary>
