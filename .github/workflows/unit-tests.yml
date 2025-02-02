@@ -22,7 +22,7 @@ jobs:
       - name: Startup Docker Components
         run: |
           cd DragonFruit.Data.Queues.Tests
-          docker-compose up --detach
+          docker compose up --detach
         
       - name: Run Unit Tests
         run: dotnet test
